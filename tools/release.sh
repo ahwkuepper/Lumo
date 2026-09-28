@@ -16,6 +16,7 @@
 # takes every past release down with it. It is not going into CI. See SECURITY.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+ROOT="$PWD"
 
 PHASE="${1:-}"
 VERSION="${2:-}"
@@ -37,8 +38,7 @@ CANONICAL=/private/tmp/vesta-verify/Vesta
 # single-arch directory, so hashing it would record a binary the DMG does not carry.
 BIN="$CANONICAL/.build/apple/Products/Release/Vesta"
 
-# The shipped variant. macOS 14 reaches every machine the README claims; the Liquid
-# Glass variant stays a build-from-source option.
+# The minimum supported OS. A modern SDK includes runtime-gated Liquid Glass.
 export VESTA_MACOS_TARGET="${VESTA_MACOS_TARGET:-14.0}"
 
 xcode_build() {
@@ -70,6 +70,10 @@ case "$PHASE" in
 
 prepare)
     [ -n "$(git status --porcelain)" ] && { echo "error: working tree is dirty." >&2; exit 1; }
+    if git show-ref --verify --quiet "refs/tags/$TAG"; then
+        echo "error: $TAG already exists; use a new release version." >&2
+        exit 1
+    fi
 
     case "${DEVELOPER_DIR:-}" in
         "")           echo "error: set DEVELOPER_DIR explicitly for a release." >&2; exit 1 ;;
@@ -128,7 +132,7 @@ MANIFEST
     # identifier, and verify-release.sh clones by tag.
     git add Info.plist "release/$TAG.txt"
     git commit -q -m "Release $VERSION"
-    git tag -f "$TAG" -m "Vesta $VERSION" >/dev/null
+    git tag "$TAG" -m "Vesta $VERSION" >/dev/null
 
     echo
     echo "prepared $TAG — unsigned hash $UNSIGNED_HASH"
@@ -136,7 +140,9 @@ MANIFEST
     echo "Next:"
     echo "  tools/publish.sh --message \"Release $VERSION\""
     echo "  # merge the promotion PR, then push the tag so CI can attest it:"
-    echo "  git push public $TAG:refs/tags/$TAG"
+    echo "  git fetch --prune public"
+    echo "  git push public public/main:refs/tags/$TAG"
+    echo "  # Never push the local tag: its ancestry is private."
     echo "  # wait for the attest workflow, then:"
     echo "  tools/release.sh sign $VERSION"
     ;;
@@ -176,14 +182,16 @@ sign)
     # attested — the published hash would describe an artefact nobody downloaded.
     echo "==> signing and notarising"
     VESTA_PREBUILT_BINARY="$BIN" ./build.sh release --release
-    (cd build && rm -f Vesta.zip && zip -qr Vesta.zip Vesta.app)
+    mkdir -p build
+    rm -f build/Vesta.zip
+    (cd .build/app && zip -qr "$ROOT/build/Vesta.zip" Vesta.app)
     xcrun notarytool submit --keychain-profile "vesta-notary" --wait build/Vesta.zip
-    xcrun stapler staple build/Vesta.app
+    xcrun stapler staple .build/app/Vesta.app
     rm -f build/Vesta.zip
 
     echo "==> packaging"
     rm -f "build/Vesta-$VERSION.dmg"
-    hdiutil create -quiet -volname "Vesta" -srcfolder build/Vesta.app \
+    hdiutil create -quiet -volname "Vesta" -srcfolder .build/app/Vesta.app \
         -ov -format UDZO "build/Vesta-$VERSION.dmg"
 
     # The disk image needs its own signature and its own ticket. Stapling the app

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import SwiftUI
+import AppKit
 import VestaKit
 
 extension Color {
@@ -10,127 +11,112 @@ extension Color {
     }
 }
 
-/// A slider whose track previews the result of moving it.
-///
-/// The stock `Slider` is the right control for an abstract quantity. This app
-/// controls something you can look at, so the track shows the actual light: black
-/// to the bulb's colour for brightness, and the real Planckian ramp for colour
-/// temperature. It also lets you drag from anywhere on the track rather than
-/// requiring you to grab a small thumb.
-struct GradientSlider: View {
+/// Native macOS slider behavior and handle, with a track that previews the light.
+/// AppKit owns knob drawing, hit testing, tracking, focus and accessibility. In
+/// particular, its resting handle and interaction material follow the current OS.
+struct GradientSlider: NSViewRepresentable {
     @Binding var value: Double
     var range: ClosedRange<Double> = 0...1
     var gradient: Gradient
     var label: String
-    /// Formats the value for VoiceOver and the trailing readout.
     var format: (Double) -> String
     var isEnabled: Bool = true
 
-    @State private var isDragging = false
-    @FocusState private var isFocused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.keyboardActivity) private var keyboard
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    /// Drawn only while the keyboard is in use — see `KeyboardActivity`. A ring that
-    /// is always on is noise for the pointer users who are most of the audience.
-    private var showsFocusRing: Bool { isFocused && keyboard.isActive }
-
-    /// One arrow press. Twenty steps across the range matches what VoiceOver's
-    /// adjustable action already uses.
-    private var step: Double { (range.upperBound - range.lowerBound) / 20 }
-
-    private var fraction: Double {
-        let span = range.upperBound - range.lowerBound
-        guard span > 0 else { return 0 }
-        return ((value - range.lowerBound) / span).clamped(to: 0...1)
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = NativeGradientSlider(frame: .zero)
+        slider.cell = GradientSliderCell()
+        slider.sliderType = .linear
+        slider.isVertical = false
+        slider.isContinuous = true
+        slider.controlSize = .large
+        slider.target = context.coordinator
+        slider.action = #selector(Coordinator.changed(_:))
+        slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        slider.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return slider
     }
 
-    private func adjust(by delta: Double) -> KeyPress.Result {
-        value = (value + delta).clamped(to: range)
-        return .handled
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
-            let thumbSize: CGFloat = isDragging ? 23 : 20
-            // The handle is a capsule wider than it is tall, so the travel has to be
-            // inset by its width — not its height — or it runs past the track ends.
-            let thumbWidth = thumbSize * 1.55
-            let thumbX = (width - thumbWidth) * fraction + thumbWidth / 2
-
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(LinearGradient(gradient: gradient, startPoint: .leading, endPoint: .trailing))
-                    .frame(height: 12)
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
-
-                GlassKnob(diameter: thumbSize, isActive: isDragging)
-                    .position(x: thumbX, y: geometry.size.height / 2)
-            }
-            .frame(height: geometry.size.height)
-            .contentShape(Rectangle())
-            // A stock Slider is Tab-reachable and arrow-operable for free; a custom
-            // control gets neither unless it asks. Without this, brightness and
-            // colour cannot be set from the keyboard at all.
-            .focusable(isEnabled)
-            .focused($isFocused)
-            // SwiftUI draws its own focus ring on a focusable view, and that one
-            // does not fade — it would sit under the custom ring permanently. The
-            // ring below replaces it, and is shown only while the keyboard is in use.
-            .focusEffectDisabled()
-            .overlay(
-                Capsule()
-                    .stroke(Color.accentColor, lineWidth: 2)
-                    .padding(-3)
-                    .opacity(showsFocusRing ? 1 : 0)
-                    .motion(.easeOut(duration: 0.25), value: showsFocusRing)
-            )
-            .onKeyPress(.leftArrow)  { adjust(by: -step) }
-            .onKeyPress(.rightArrow) { adjust(by: step) }
-            .onKeyPress(.downArrow)  { adjust(by: -step) }
-            .onKeyPress(.upArrow)    { adjust(by: step) }
-            .onKeyPress(.home)       { value = range.lowerBound; return .handled }
-            .onKeyPress(.end)        { value = range.upperBound; return .handled }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { drag in
-                        if !isDragging {
-                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.12)) {
-                                isDragging = true
-                            }
-                        }
-                        let f = ((drag.location.x - thumbWidth / 2) / (width - thumbWidth))
-                            .clamped(to: 0...1)
-                        value = range.lowerBound + f * (range.upperBound - range.lowerBound)
-                    }
-                    .onEnded { _ in
-                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.18)) {
-                            isDragging = false
-                        }
-                    }
-            )
+    func updateNSView(_ slider: NSSlider, context: Context) {
+        context.coordinator.parent = self
+        slider.minValue = range.lowerBound
+        slider.maxValue = range.upperBound
+        slider.doubleValue = min(max(value, range.lowerBound), range.upperBound)
+        slider.isEnabled = isEnabled && context.environment.isEnabled
+        slider.setAccessibilityLabel(label)
+        slider.setAccessibilityValueDescription(format(slider.doubleValue))
+        if let cell = slider.cell as? GradientSliderCell {
+            let stops = gradient.stops
+            cell.gradient = NSGradient(colors: stops.map { NSColor($0.color) },
+                                       atLocations: stops.map(\.location),
+                                       colorSpace: .deviceRGB)
         }
-        .frame(height: 20)
-        .opacity(isEnabled ? 1 : 0.35)
-        .disabled(!isEnabled)
-        .accessibilityElement()
-        .accessibilityLabel(label)
-        .accessibilityValue(format(value))
-        .accessibilityAdjustableAction { direction in
-            let step = (range.upperBound - range.lowerBound) / 20
-            switch direction {
-            case .increment: value = (value + step).clamped(to: range)
-            case .decrement: value = (value - step).clamped(to: range)
-            @unknown default: break
-            }
+        slider.needsDisplay = true
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSlider,
+                      context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 280, height: max(24, nsView.intrinsicContentSize.height))
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var parent: GradientSlider
+        init(_ parent: GradientSlider) { self.parent = parent }
+
+        @objc func changed(_ slider: NSSlider) {
+            guard slider.isEnabled else { return }
+            slider.setAccessibilityValueDescription(parent.format(slider.doubleValue))
+            parent.value = slider.doubleValue
         }
     }
 }
 
-extension Comparable {
-    func clamped(to r: ClosedRange<Self>) -> Self {
-        min(max(self, r.lowerBound), r.upperBound)
+/// Preserve Vesta's keyboard access even when macOS's optional full keyboard
+/// navigation setting is off. AppKit still owns pointer tracking and the knob.
+private final class NativeGradientSlider: NSSlider {
+    override var acceptsFirstResponder: Bool { isEnabled }
+    override var canBecomeKeyView: Bool { isEnabled && !isHidden }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+            super.keyDown(with: event)
+            return
+        }
+        let step = (maxValue - minValue) / 20
+        switch event.keyCode {
+        case 123, 125: doubleValue = max(minValue, doubleValue - step)
+        case 124, 126: doubleValue = min(maxValue, doubleValue + step)
+        case 115: doubleValue = minValue
+        case 119: doubleValue = maxValue
+        default:
+            super.keyDown(with: event)
+            return
+        }
+        sendAction(action, to: target)
+    }
+}
+
+/// Only the rail is customized. Do not override knob drawing or geometry: that
+/// would replace the system's Liquid Glass slider with another imitation.
+private final class GradientSliderCell: NSSliderCell {
+    var gradient: NSGradient?
+
+    override func drawBar(inside rect: NSRect, flipped: Bool) {
+        let rail = NSRect(x: rect.minX, y: rect.midY - 4, width: rect.width, height: 8)
+        let path = NSBezierPath(roundedRect: rail, xRadius: 4, yRadius: 4)
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current?.cgContext.setAlpha(isEnabled ? 1 : 0.35)
+        gradient?.draw(in: path, angle: 0)
     }
 }
 

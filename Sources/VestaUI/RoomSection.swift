@@ -30,7 +30,8 @@ struct RoomSection: View {
                 LightRow(light: light, store: store, expansion: $expansion, roomID: room.id)
             }
         }
-        .padding(.bottom, 4)
+        .padding(.top, 4)
+        .padding(.bottom, 6)
     }
 
     // MARK: - Header
@@ -50,6 +51,7 @@ struct RoomSection: View {
                 .font(.roomCount)
                 .foregroundStyle(.secondary)
                 .contentTransition(.numericText())
+                .monospacedDigit()
 
             Spacer()
 
@@ -60,12 +62,13 @@ struct RoomSection: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.controlGlyphBold)
-                    .frame(width: 18, height: 18)
+                    .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(isNaming ? Color.accentColor : .secondary)
             .help("Save these lights as a scene in \(room.name)")
+            .accessibilityLabel("Save scene in \(room.name)")
 
             // Whole-room switch: the bridge applies it in one call, so the room
             // switches together instead of rippling bulb by bulb.
@@ -82,7 +85,7 @@ struct RoomSection: View {
             .disabled(!lights.contains { $0.connection.isCommandable })
             .accessibilityLabel("\(room.name) lights")
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
     }
 
     // MARK: - Scenes
@@ -98,8 +101,8 @@ struct RoomSection: View {
                     }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 1)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 4)
             .chipGroup()
         }
         .scrollIndicators(.never)

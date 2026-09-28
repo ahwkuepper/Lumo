@@ -104,7 +104,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         show()
     }
 
-    private func show() {
+    func show() {
+        guard !popover.isShown else { return }
+        Task { await model.start() }
         guard let button = statusItem.button else { return }
         // .minY hangs the popover *below* the status item. .maxY anchors it off
         // the button's top edge, which for an item in the menu bar puts the

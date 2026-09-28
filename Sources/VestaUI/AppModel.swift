@@ -49,6 +49,7 @@ final class AppModel {
     private(set) var mode: Mode = .bluetooth
     private(set) var store: LightStore
     private(set) var isStarting = false
+    private var choseBluetooth = false
 
     init() {
         switch BridgeStore.read() {
@@ -70,6 +71,10 @@ final class AppModel {
     /// Same path as recovery — the Keychain is the single source of truth for
     /// whether a bridge is paired, so nothing is passed in by hand.
     func adoptNewPairing() async {
+        guard !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
+        choseBluetooth = false
         await recoverBridgeIfPossible()
     }
 
@@ -79,9 +84,10 @@ final class AppModel {
     /// rebuild that changed the ACL, an item being rewritten by a CLI run, a locked
     /// keychain — recovers by itself instead of stranding the session.
     private func recoverBridgeIfPossible() async {
-        guard mode != .bridge else { return }
+        guard mode != .bridge, !choseBluetooth else { return }
         switch BridgeStore.read() {
         case .paired(let credentials):
+            await store.stop()
             credentialFailure = nil
             isBridgePaired = true
             mode = .bridge
@@ -108,9 +114,12 @@ final class AppModel {
     private var hasStarted = false
 
     func start() async {
-        guard !isPreview else { return }
+        guard !isPreview, !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
         await recoverBridgeIfPossible()
         if hasStarted {
+            await store.refreshAvailability()
             // Reopening the popover: the lights may have been changed from the Hue
             // app, a switch or a routine since it was last shown.
             await store.resync()
@@ -122,11 +131,13 @@ final class AppModel {
     }
 
     func switchTo(_ newMode: Mode) async {
-        guard newMode != mode else { return }
+        guard newMode != mode, !isStarting else { return }
         isStarting = true
         defer { isStarting = false }
 
+        await store.stop()
         mode = newMode
+        choseBluetooth = newMode == .bluetooth
         let transport: LightTransport
         switch newMode {
         case .bridge:
@@ -144,7 +155,12 @@ final class AppModel {
             transport = BLETransport()
         }
         store = LightStore(transport: transport)
+        hasStarted = true
         await store.start()
+    }
+
+    func retryConnection() async {
+        await start()
     }
 
     /// The menu bar icon reflects the room at a glance — filled when anything is

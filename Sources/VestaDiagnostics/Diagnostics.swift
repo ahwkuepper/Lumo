@@ -120,17 +120,12 @@ public enum Diagnostics {
         return minimum
     }()
 
-    /// Which variant this binary is, not which OS it happens to be running on.
-    ///
-    /// `#available` is a runtime check, so a classic build running on macOS 26
-    /// reported "Liquid Glass" — the exact confusion this line exists to resolve.
-    /// `VESTA_GLASS` is set by Package.swift from the deployment target.
+    /// The appearance available in this binary on the current OS.
     private static var appearance: String {
         #if VESTA_GLASS
-        return "Liquid Glass"
-        #else
-        return "classic"
+        if #available(macOS 26.0, *) { return "Liquid Glass" }
         #endif
+        return "classic"
     }
 
     private static var architecture: String {

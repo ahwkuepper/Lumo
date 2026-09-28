@@ -60,7 +60,9 @@ struct MenuBarView: View {
             Image(systemName: store.anyLightOn ? "lightbulb.fill" : "lightbulb")
                 .font(.appGlyph)
                 .foregroundStyle(store.anyLightOn ? .yellow : .secondary)
-                .frame(width: 22)
+                .frame(width: 30, height: 34)
+                .background(.yellow.opacity(store.anyLightOn ? 0.10 : 0),
+                            in: RoundedRectangle(cornerRadius: 10))
                 .contentTransition(.symbolEffect(.replace))
 
             VStack(alignment: .leading, spacing: 1) {
@@ -86,7 +88,7 @@ struct MenuBarView: View {
             .accessibilityLabel("All lights")
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.vertical, 13)
     }
 
     private var summary: String {
@@ -267,9 +269,13 @@ struct MenuBarView: View {
     /// Denying the permission prompt once is a dead end unless the app offers a way back.
     private func unavailable(_ message: String) -> some View {
         VStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.noticeGlyph)
-                .foregroundStyle(.orange)
+            if store.availability == .initializing {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.noticeGlyph)
+                    .foregroundStyle(.orange)
+            }
             Text(message)
                 .font(.noticeBody)
                 .multilineTextAlignment(.center)
@@ -282,6 +288,11 @@ struct MenuBarView: View {
                 }
                 .controlSize(.small)
             }
+            Button("Retry Connection") {
+                Task { await model.retryConnection() }
+            }
+            .controlSize(.small)
+            .disabled(model.isStarting)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 24)
