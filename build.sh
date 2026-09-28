@@ -89,7 +89,19 @@ else
         -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$ROOT/Info.plist"
 fi
 
-APP="build/Vesta.app"
+# Hidden staging stays out of Spotlight's application search, including when
+# preparing a release. Keep an old staging bundle recoverable during migration.
+if [ -d build/Vesta.app ] && [ ! -L build/Vesta.app ]; then
+    OLD_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' build/Vesta.app/Contents/Info.plist 2>/dev/null || true)
+    if [ "$OLD_ID" = "io.github.ahwkuepper.Vesta" ]; then
+        ARCHIVE=$(mktemp -d "$ROOT/.build/previous-apps.XXXXXX")
+        /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+            -u "$ROOT/build/Vesta.app" || true
+        mv build/Vesta.app "$ARCHIVE/Vesta.app"
+        echo "[migration] previous staging app saved in $ARCHIVE"
+    fi
+fi
+APP=".build/app/Vesta.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 [ -f "$BUILT" ] || { echo "error: no binary at $BUILT" >&2; exit 1; }
@@ -108,7 +120,7 @@ fi
 # LSMinimumSystemVersion must match the variant actually built, or the classic
 # build ships metadata claiming it needs macOS 26 and LaunchServices refuses to
 # open it on the systems it was built for.
-MIN_OS="${VESTA_MACOS_TARGET:-26.0}"
+MIN_OS="${VESTA_MACOS_TARGET:-14.0}"
 sed "s|<key>LSMinimumSystemVersion</key><string>[^<]*</string>|<key>LSMinimumSystemVersion</key><string>$MIN_OS</string>|" \
     Info.plist > "$APP/Contents/Info.plist"
 

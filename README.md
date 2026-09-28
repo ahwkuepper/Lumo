@@ -32,21 +32,111 @@ Rooms, scenes, per-light colour and brightness, gradients and effects — from t
 menu bar.
 
 <p align="center">
-  <img src="docs/screenshots/rooms-dark.png" width="330" alt="Vesta's popover showing two rooms, each with its own switch and scene chips">
+  <img src="docs/screenshots/liquid-glass/rooms-dark.jpg" width="330" alt="Liquid Glass: rooms and scenes in dark appearance">
   &nbsp;&nbsp;
-  <img src="docs/screenshots/controls-dark.png" width="330" alt="A light expanded to show brightness, colour temperature with a live Kelvin readout, gradient palettes and built-in effects">
+  <img src="docs/screenshots/liquid-glass/controls-light.jpg" width="330" alt="Liquid Glass: expanded light controls with native slider handles in light appearance">
 </p>
+
+<details>
+<summary>Liquid Glass — light and dark gallery</summary>
+
+**Rooms and scenes**
+
 <p align="center">
-  <img src="docs/screenshots/states-dark.png" width="330" alt="A room where one light is unreachable, shown distinctly from a light that is merely off">
+  <img src="docs/screenshots/liquid-glass/rooms-light.jpg" width="330" alt="Rooms and scenes, liquid-glass, light appearance">
   &nbsp;&nbsp;
-  <img src="docs/screenshots/rooms-light.png" width="330" alt="The same popover in light appearance">
+  <img src="docs/screenshots/liquid-glass/rooms-dark.jpg" width="330" alt="Rooms and scenes, liquid-glass, dark appearance">
 </p>
+
+**Expanded light controls**
+
+<p align="center">
+  <img src="docs/screenshots/liquid-glass/controls-light.jpg" width="330" alt="Expanded light controls, liquid-glass, light appearance">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/liquid-glass/controls-dark.jpg" width="330" alt="Expanded light controls, liquid-glass, dark appearance">
+</p>
+
+**Unreachable light**
+
+<p align="center">
+  <img src="docs/screenshots/liquid-glass/states-light.jpg" width="330" alt="Unreachable light, liquid-glass, light appearance">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/liquid-glass/states-dark.jpg" width="330" alt="Unreachable light, liquid-glass, dark appearance">
+</p>
+
+**Bridge setup**
+
+<p align="center">
+  <img src="docs/screenshots/liquid-glass/setup-light.jpg" width="330" alt="Bridge setup, liquid-glass, light appearance">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/liquid-glass/setup-dark.jpg" width="330" alt="Bridge setup, liquid-glass, dark appearance">
+</p>
+
+**Bluetooth recovery**
+
+<p align="center">
+  <img src="docs/screenshots/liquid-glass/bluetooth-light.jpg" width="330" alt="Bluetooth recovery, liquid-glass, light appearance">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/liquid-glass/bluetooth-dark.jpg" width="330" alt="Bluetooth recovery, liquid-glass, dark appearance">
+</p>
+
+</details>
+
+<details>
+<summary>Non-Liquid Glass fallback — light and dark gallery</summary>
+
+**Rooms and scenes**
+
+<p align="center">
+  <img src="docs/screenshots/fallback/rooms-light.jpg" width="330" alt="Rooms and scenes, fallback, light appearance">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/fallback/rooms-dark.jpg" width="330" alt="Rooms and scenes, fallback, dark appearance">
+</p>
+
+**Expanded light controls**
+
+<p align="center">
+  <img src="docs/screenshots/fallback/controls-light.jpg" width="330" alt="Expanded light controls, fallback, light appearance">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/fallback/controls-dark.jpg" width="330" alt="Expanded light controls, fallback, dark appearance">
+</p>
+
+**Unreachable light**
+
+<p align="center">
+  <img src="docs/screenshots/fallback/states-light.jpg" width="330" alt="Unreachable light, fallback, light appearance">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/fallback/states-dark.jpg" width="330" alt="Unreachable light, fallback, dark appearance">
+</p>
+
+**Bridge setup**
+
+<p align="center">
+  <img src="docs/screenshots/fallback/setup-light.jpg" width="330" alt="Bridge setup, fallback, light appearance">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/fallback/setup-dark.jpg" width="330" alt="Bridge setup, fallback, dark appearance">
+</p>
+
+**Bluetooth recovery**
+
+<p align="center">
+  <img src="docs/screenshots/fallback/bluetooth-light.jpg" width="330" alt="Bluetooth recovery, fallback, light appearance">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/fallback/bluetooth-dark.jpg" width="330" alt="Bluetooth recovery, fallback, dark appearance">
+</p>
+
+</details>
+
+All screenshots use simulated rooms and lights. The fallback gallery disables
+Vesta’s Liquid Glass styling on the same Mac; it previews the older-system layout,
+while native controls still follow the host macOS. See the
+[capture notes](docs/screenshots/README.md) for details.
 
 ## Requirements
 
-- macOS 14 or later for the released download, which is universal (Apple silicon
-  and Intel) and uses the classic appearance. Building from source on macOS 26 or
-  later gives the Liquid Glass variant.
+- macOS 14 or later. Builds made with Xcode 26 or newer use Liquid Glass on
+  macOS 26+ and native fallback controls on older systems. Releases are universal
+  (Apple silicon and Intel).
 - A Philips Hue Bridge on the same network
 - Xcode to build (not just Command Line Tools — SwiftUI's `@State` is a macro whose
   plugin ships inside Xcode). `build.sh` selects a toolchain via `DEVELOPER_DIR`.
@@ -63,24 +153,34 @@ Without it, `build.sh` signs ad-hoc; the hash changes every rebuild, so macOS tr
 each build as a new app and re-prompts for Keychain access to the bridge key.
 
 ```bash
-./build.sh && open build/Vesta.app
+./build.sh && open .build/app/Vesta.app
 ```
 
-### Two build variants
+### Appearance and installation
 
-Liquid Glass comes from the deployment target, not from calling `glassEffect`.
-Building against macOS 26 restyles the popover chrome and every standard control, so
-one binary cannot show both looks. The target is a build parameter over one source
-tree:
+The minimum deployment target is macOS 14. The SDK supplies newer APIs, and
+runtime availability checks select Liquid Glass on macOS 26+ or the fallback on
+older systems. This follows Apple's [Liquid Glass adoption guidance](https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass).
 
 ```bash
-./build.sh                          # macOS 26 — Liquid Glass
-VESTA_MACOS_TARGET=14.0 ./build.sh   # macOS 14 — classic appearance
+./build.sh                       # adaptive appearance; macOS 14 minimum
+VESTA_CLASSIC=1 ./build.sh        # compile only fallback controls, for testing
+./tools/install.sh               # build and update /Applications/Vesta.app
 ```
 
-`Package.swift` defines `VESTA_GLASS` only for a macOS 26+ target, because
-`glassEffect` must exist at compile time — `if #available` is not sufficient. Code
-using it is guarded by `#if VESTA_GLASS`.
+Use Xcode 26 or newer to include Liquid Glass; older toolchains compile the
+fallback. `VESTA_MACOS_TARGET` can still override the minimum OS version.
+
+App bundles are staged under hidden `.build/app/`, so development and release
+staging copies do not become additional entries in app search. The build script
+archives the old `build/Vesta.app` location under `.build/previous-apps.*/` when
+migrating an existing checkout. Keep `/Applications/Vesta.app` as the everyday
+installation. The app also prevents a second GUI instance, including when a copy
+is opened from another folder; CLI and snapshot commands remain independent.
+
+Bluetooth availability is rechecked each time the popover opens. A permission
+grant can recover a stale Bluetooth manager automatically, and unavailable states
+offer **Retry Connection** without requiring the app to quit.
 
 ## Bridge setup
 
@@ -89,7 +189,7 @@ the bridge within 60 seconds. Launch via `open -n` so the local-network permissi
 prompt attaches to the app rather than the calling shell:
 
 ```bash
-open -n -W build/Vesta.app --args --pair-bridge <bridge-ip>
+open -n -W .build/app/Vesta.app --args --pair-bridge <bridge-ip>
 ```
 
 The application key is stored in the Keychain, never on disk. The bridge's public
@@ -134,7 +234,9 @@ last scene in a burst is sent.
 
 **Per light**, read from the bridge rather than hard-coded:
 
-- Brightness, with the track tinted the colour that light is emitting
+- Brightness, with the track tinted the colour that light is emitting. Slider
+  handles and pointer interactions are native macOS controls; only the colour
+  tracks are custom drawn.
 - Colour temperature with a live Kelvin readout and presets (candle, warm, reading,
   cool). On a gradient fixture, writing a colour temperature is also what clears the
   gradient and returns the lamp to flat light.
@@ -191,6 +293,16 @@ The hardware suite needs a bridge on the network: `--verify-bridge`, `--test-lig
 `--test-scene-switch`, `--test-relocate`, `--test-scenes`.
 
 ### Snapshots
+
+For an interactive preview with native controls and compositor-rendered glass:
+
+```bash
+swift build
+.build/debug/Vesta --preview-snapshots
+```
+
+The **Snapshots** menu switches scenarios, appearance and fallback styling. It uses
+only simulated data. See [capture notes](docs/screenshots/README.md).
 
 Renders the popover in every interesting state, light and dark, to PNG. Run the
 unsandboxed binary from `.build`; the signed bundle cannot write outside its

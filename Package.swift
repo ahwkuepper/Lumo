@@ -5,22 +5,18 @@
 import PackageDescription
 import Foundation
 
-// Liquid Glass is opted into by the deployment target, not by calling glassEffect:
-// building against macOS 26 restyles the popover chrome and every standard control.
-// A single binary therefore cannot show the new look on 26+ and the old one on 14 —
-// the design language is fixed at build time. So the target is a build parameter and
-// the entire source tree is shared between the two variants.
-//
-//   ./build.sh              → macOS 26 baseline, Liquid Glass
-//   VESTA_MACOS_TARGET=14.0 ./build.sh  → macOS 14 baseline, classic appearance
-let deploymentTarget = ProcessInfo.processInfo.environment["VESTA_MACOS_TARGET"] ?? "26.0"
+// The SDK supplies Liquid Glass APIs; the deployment target specifies the oldest
+// supported OS. Runtime availability checks allow one app to support both looks.
+let deploymentTarget = ProcessInfo.processInfo.environment["VESTA_MACOS_TARGET"] ?? "14.0"
 
-// glassEffect exists only in the macOS 26 SDK. `if #available` is not enough: the
-// symbol has to be present at compile time, so on an older Xcode the source would
-// not build at all. Compiling the glass paths out keeps the tree buildable on any
-// supported toolchain — and the classic variant genuinely does not need them.
-let major = Int(deploymentTarget.split(separator: ".").first.map(String.init) ?? "") ?? 0
-let glassSettings: [SwiftSetting] = major >= 26 ? [.define("VESTA_GLASS")] : []
+// Xcode 26 ships Swift 6.2 and the macOS 26 SDK. Older Xcode toolchains compile
+// only the fallback. VESTA_CLASSIC exercises that path on a modern toolchain too.
+#if compiler(>=6.2)
+let glassSettings: [SwiftSetting] = ProcessInfo.processInfo.environment["VESTA_CLASSIC"] == "1"
+    ? [] : [.define("VESTA_GLASS")]
+#else
+let glassSettings: [SwiftSetting] = []
+#endif
 
 let package = Package(
     name: "Vesta",
@@ -55,6 +51,8 @@ let package = Package(
                           swiftSettings: glassSettings),
 
         .testTarget(name: "VestaKitTests", dependencies: ["VestaKit"]),
+        .testTarget(name: "VestaBLETests", dependencies: ["VestaBLE"]),
+        .testTarget(name: "VestaUITests", dependencies: ["VestaUI"]),
         .testTarget(name: "VestaBridgeTests", dependencies: ["VestaBridge", "VestaKit"],
                     resources: [.copy("Fixtures")]),
     ]

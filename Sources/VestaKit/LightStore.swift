@@ -68,17 +68,40 @@ public final class LightStore {
     public init(transport: LightTransport,
                 initialLights: [Light] = [],
                 initialRooms: [Room] = [],
-                initialScenes: [RoomScene] = []) {
+                initialScenes: [RoomScene] = [],
+                initialAvailability: TransportAvailability = .ready) {
         self.transport = transport
         self.lights = initialLights
         self.rooms = initialRooms
         self.scenes = initialScenes
+        self.availability = initialAvailability
     }
 
     // MARK: - Lifecycle
 
+    private var lifecycleGeneration = 0
+
+    public func stop() async {
+        lifecycleGeneration += 1
+        pendingRecall?.cancel()
+        pendingRecall = nil
+        recallGeneration += 1
+        latestWrite.removeAll()
+        for task in writeLoop.values { task.cancel() }
+        writeLoop.removeAll()
+        errorDismissal?.cancel()
+        await transport.stop()
+    }
+
+    public func refreshAvailability() async {
+        await transport.refreshAvailability()
+    }
+
     public func start() async {
+        lifecycleGeneration += 1
+        let generation = lifecycleGeneration
         await transport.start { [weak self] event in
+            guard self?.lifecycleGeneration == generation else { return }
             self?.handle(event)
         }
         await refreshRoomsAndScenes()

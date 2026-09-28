@@ -15,6 +15,9 @@ public protocol LightTransport: Sendable {
 
     func stop() async
 
+    /// Recheck system availability when the app is reopened or the user retries.
+    func refreshAvailability() async
+
     func setPower(_ on: Bool, for id: Light.ID) async throws
     func setBrightness(_ brightness: Double, for id: Light.ID) async throws
     func setColor(_ color: LightColor, for id: Light.ID) async throws
@@ -39,6 +42,7 @@ public protocol LightTransport: Sendable {
 }
 
 public extension LightTransport {
+    func refreshAvailability() async {}
     func setGradient(_ gradient: LightGradient, for id: Light.ID) async throws {
         throw TransportError.unsupported
     }
@@ -72,6 +76,7 @@ public enum TransportEvent: Sendable {
 
 public enum TransportAvailability: Sendable, Equatable {
     case ready
+    case initializing
     case unauthorized
     case poweredOff
     case unsupported
@@ -83,9 +88,10 @@ public enum TransportAvailability: Sendable, Equatable {
     public var message: String? {
         switch self {
         case .ready:              nil
+        case .initializing:       "Connecting to Bluetooth…"
         case .unauthorized:       "Vesta needs Bluetooth access to find your lights."
         case .poweredOff:         "Bluetooth is turned off."
-        case .unsupported:        "This Mac cannot use Bluetooth Low Energy."
+        case .unsupported:        "Bluetooth is currently unavailable. Try reconnecting."
         case .credentialsRejected:
             "The Bridge no longer recognises Vesta. Pair it again to reconnect."
         }

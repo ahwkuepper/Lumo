@@ -43,7 +43,7 @@ records what is already planned and what has already been ruled out.
 
 ```bash
 ./tools/make-signing-identity.sh     # once
-./build.sh && open build/Vesta.app
+./build.sh && open .build/app/Vesta.app
 swift test
 ```
 
@@ -59,7 +59,7 @@ second; failing in CI costs a round trip.
 ```
 
 Both build variants must compile — `swift build` and
-`VESTA_MACOS_TARGET=14.0 swift build`. Building one is not building the tree.
+`VESTA_CLASSIC=1 swift build`. Building one is not building the tree.
 
 ## Scope
 

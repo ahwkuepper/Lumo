@@ -14,16 +14,19 @@ import SwiftUI
 extension View {
 
     func chipStyle(isActive: Bool = false) -> some View {
-        // A fill, not a ring: `strokeBorder` draws inside the shape, so an outlined
-        // chip reads as smaller than its neighbours even though the geometry matches.
-        background(
-            Capsule().fill(isActive ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
-        )
-        .foregroundStyle(isActive ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+        modifier(ChipSurface(isActive: isActive))
     }
 
-    /// No-op, kept so call sites read the same whether or not grouping applies.
-    func chipGroup(spacing: CGFloat = 6) -> some View { self }
+    @ViewBuilder
+    func chipGroup(spacing: CGFloat = 6) -> some View {
+        #if VESTA_GLASS
+        if #available(macOS 26.0, *), GlassSettings.isEnabled {
+            GlassEffectContainer(spacing: spacing) { self }
+        } else { self }
+        #else
+        self
+        #endif
+    }
 
     /// One size for every chip. Scenes, temperature presets and effects are one
     /// visual vocabulary and had drifted 1–2pt apart in padding and text size.
@@ -31,5 +34,52 @@ extension View {
         font(.chipLabel)
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
+    }
+}
+
+private struct ChipSurface: ViewModifier {
+    let isActive: Bool
+    @State private var isHovered = false
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        surface(content)
+            .overlay {
+                Capsule().strokeBorder(isActive ? Color.clear : Color.primary.opacity(
+                    contrast == .increased ? 0.45 : (isHovered ? 0.18 : 0.08)), lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            }
+            .brightness(isHovered && isEnabled ? 0.035 : 0)
+            .onHover { isHovered = $0 }
+            .motion(.easeOut(duration: 0.15), value: isHovered)
+    }
+
+    @ViewBuilder
+    private func surface(_ content: Content) -> some View {
+        #if VESTA_GLASS
+        if #available(macOS 26.0, *), GlassSettings.isEnabled, !reduceTransparency {
+            content
+                .foregroundStyle(isActive ? Color.white : Color.primary.opacity(0.85))
+                .glassEffect(.regular.tint(isActive ? Color.accentColor : nil).interactive(), in: Capsule())
+        } else { fallback(content) }
+        #else
+        fallback(content)
+        #endif
+    }
+
+    private func fallback(_ content: Content) -> some View {
+        content
+            .foregroundStyle(isActive ? Color.white : Color.primary.opacity(0.85))
+            .background {
+                if isActive {
+                    Capsule().fill(Color.accentColor.gradient)
+                } else if reduceTransparency {
+                    Capsule().fill(Color(nsColor: .controlBackgroundColor))
+                } else {
+                    Capsule().fill(.primary.opacity(0.065))
+                }
+            }
     }
 }

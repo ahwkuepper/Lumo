@@ -45,6 +45,11 @@ private func runCLI(_ work: @escaping @Sendable () async -> Int32) -> Never {
 
 let arguments = CommandLine.arguments
 
+if arguments.contains("--preview-snapshots") {
+    Snapshot.runPreview()
+    exit(0)
+}
+
 if let i = arguments.firstIndex(of: "--snapshot"), i + 1 < arguments.count {
     let directory = URL(fileURLWithPath: arguments[i + 1])
     runCLI {

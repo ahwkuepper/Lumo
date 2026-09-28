@@ -19,6 +19,126 @@ import VestaBridge
 /// so the UI can be reviewed and regression-checked from a build script.
 @MainActor
 public enum Snapshot {
+    private static var capturesCompositor = false
+
+    /// Interactive demo windows for external screenshot tools. This mode uses
+    /// simulated data, never opens the Keychain, and never captures the desktop.
+    public static func runPreview() {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        let preview = PreviewController()
+        preview.installMenu()
+        preview.show()
+        app.activate(ignoringOtherApps: true)
+        withExtendedLifetime(preview) { app.run() }
+    }
+
+    private final class PreviewWindow: NSWindow {
+        override var canBecomeKey: Bool { true }
+        override var canBecomeMain: Bool { true }
+    }
+
+    @MainActor
+    private final class PreviewController: NSObject {
+        private var scenario = "01-rooms"
+        private var dark = true
+        private var glass = true
+        private var window: NSWindow?
+        private var backdrop: NSWindow?
+
+        func installMenu() {
+            let main = NSMenu()
+            let appItem = NSMenuItem()
+            main.addItem(appItem)
+            let appMenu = NSMenu()
+            appMenu.addItem(withTitle: "Quit Preview", action: #selector(NSApplication.terminate(_:)),
+                            keyEquivalent: "q")
+            appItem.submenu = appMenu
+            let item = NSMenuItem()
+            main.addItem(item)
+            let menu = NSMenu(title: "Snapshots")
+            item.submenu = menu
+            let scenes = [("Rooms", "01-rooms"), ("Controls", "02-controls"),
+                          ("Unreachable light", "04-mixed"), ("Setup", "03-empty"),
+                          ("Bluetooth recovery", "05-bluetooth-unavailable")]
+            for (index, scene) in scenes.enumerated() {
+                let command = menu.addItem(withTitle: scene.0, action: #selector(selectScenario(_:)),
+                                           keyEquivalent: String(index + 1))
+                command.representedObject = scene.1
+                command.target = self
+            }
+            menu.addItem(.separator())
+            for (title, key) in [("Dark", "d"), ("Light", "l"),
+                                 ("Liquid Glass", "g"), ("Fallback", "f")] {
+                let command = menu.addItem(withTitle: title, action: #selector(selectAppearance(_:)),
+                                           keyEquivalent: key)
+                command.target = self
+            }
+            NSApp.mainMenu = main
+        }
+
+        @objc private func selectScenario(_ sender: NSMenuItem) {
+            guard let name = sender.representedObject as? String else { return }
+            scenario = name
+            show()
+        }
+
+        @objc private func selectAppearance(_ sender: NSMenuItem) {
+            switch sender.keyEquivalent {
+            case "d": dark = true
+            case "l": dark = false
+            case "g": glass = true
+            case "f": glass = false
+            default: return
+            }
+            show()
+        }
+
+        func show() {
+            guard let model = Snapshot.scenarios().first(where: { $0.0 == scenario })?.1,
+                  let screen = NSScreen.main else { return }
+            window?.orderOut(nil)
+            backdrop?.orderOut(nil)
+            GlassSettings.isEnabled = glass
+            let appearance: NSAppearance.Name = dark ? .darkAqua : .aqua
+            let background = Snapshot.makeBackdropWindow(on: screen, appearance: appearance)
+            background.ignoresMouseEvents = true
+            background.orderFrontRegardless()
+            backdrop = background
+            let hosting = NSHostingView(rootView: MenuBarView(model: model,
+                initialExpandedID: Snapshot.expandedFor(scenario), rendersFullHeight: true)
+                .environment(\.colorScheme, dark ? .dark : .light))
+            let preview = PreviewWindow(contentRect: NSRect(x: 0, y: 0, width: 330, height: 600),
+                styleMask: [.borderless], backing: .buffered, defer: false)
+            preview.title = "Vesta Screenshot Preview"
+            preview.appearance = NSAppearance(named: appearance)
+            preview.backgroundColor = .clear
+            preview.isOpaque = false
+            preview.hasShadow = false
+            preview.level = .floating
+            let material = NSVisualEffectView(frame: preview.contentView?.bounds ?? .zero)
+            material.material = .popover
+            material.blendingMode = .behindWindow
+            material.state = .active
+            material.wantsLayer = true
+            material.layer?.cornerRadius = 12
+            material.layer?.masksToBounds = true
+            hosting.frame = material.bounds
+            hosting.autoresizingMask = [.width, .height]
+            material.addSubview(hosting)
+            preview.contentView = material
+            preview.center()
+            preview.makeKeyAndOrderFront(nil)
+            window = preview
+            // The content-height preference arrives after the first layout pass.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak preview] in
+                guard let self, let preview, self.window === preview else { return }
+                hosting.layoutSubtreeIfNeeded()
+                preview.setContentSize(hosting.fittingSize)
+                preview.center()
+            }
+        }
+    }
 
     public static func renderAll(to directory: URL) async throws {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -32,9 +152,10 @@ public enum Snapshot {
         // Decide up front whether the compositor is available to us, because the
         // answer changes what the view tree should even contain. `glassEffect`
         // draws nothing in-process, so rendering it without a compositor capture
-        // produces slider handles that are literally holes — worse than the
-        // fallback. Probe once, then pick the knob that can actually be drawn.
+        // loses custom glass surfaces. Probe once, then render scene chips
+        // with their opaque fallback when the compositor is unavailable.
         let canCaptureCompositedFrames = await compositorIsAvailable()
+        capturesCompositor = canCaptureCompositedFrames
 
         // Optionally photograph the real desktop to sit behind the popover. Done
         // once, and before any of our own windows are on screen, so it catches the
@@ -130,8 +251,8 @@ public enum Snapshot {
     private static func scenarios() -> [(String, AppModel)] {
         let room = SimulatedTransport.demoRooms[0]
         let sceneNames = ["Evening", "Focus", "Movie"]
-        let demoScenes = sceneNames.map {
-            RoomScene(id: UUID(), name: $0, roomID: room.id, isEditable: true)
+        let demoScenes = sceneNames.enumerated().map { index, name in
+            RoomScene(id: UUID(), name: name, roomID: room.id, isEditable: true, isActive: index == 0)
         }
 
         // 1. The everyday state: a room with lights and saved scenes.
@@ -141,10 +262,18 @@ public enum Snapshot {
                                 initialScenes: demoScenes)
 
         // 2. Two rooms, to check the section dividers and per-room headers.
+        let livingLights = [
+            Light(id: UUID(), name: "Floor lamp",
+                  state: LightState(isOn: true, brightness: 0.58, color: .temperature(mireds: 400)),
+                  connection: .ready),
+            Light(id: UUID(), name: "Table lamp",
+                  state: LightState(isOn: false, brightness: 0.35, color: .temperature(mireds: 366)),
+                  connection: .ready),
+        ]
         let secondRoom = Room(id: UUID(), name: "Living room", archetype: "living_room",
-                              lightIDs: [], groupedLightID: UUID())
+                              lightIDs: livingLights.map(\.id), groupedLightID: UUID())
         let twoRooms = LightStore(transport: SimulatedTransport(),
-                                  initialLights: SimulatedTransport.demoLights,
+                                  initialLights: SimulatedTransport.demoLights + livingLights,
                                   initialRooms: [room, secondRoom],
                                   initialScenes: demoScenes + [
                                     RoomScene(id: UUID(), name: "Sunset",
@@ -170,12 +299,28 @@ public enum Snapshot {
             ("02-controls", AppModel(previewStore: normal)),
             ("03-empty", AppModel(previewStore: empty)),
             ("04-mixed", AppModel(previewStore: mixed)),
+            ("05-bluetooth-unavailable", AppModel(previewStore: LightStore(
+                transport: SimulatedTransport(lights: []), initialAvailability: .unsupported))),
+            ("06-bluetooth-permission", AppModel(previewStore: LightStore(
+                transport: SimulatedTransport(lights: []), initialAvailability: .unauthorized))),
+            ("07-bluetooth-connecting", AppModel(previewStore: LightStore(
+                transport: SimulatedTransport(lights: []), initialAvailability: .initializing))),
         ]
     }
 
-    private static func render(_ view: some View, appearance: NSAppearance.Name,
+    private static func render(_ view: some View, appearance requestedAppearance: NSAppearance.Name,
                                to url: URL) async throws {
-        let hosting = NSHostingView(rootView: view)
+        let isDark = requestedAppearance == .darkAqua
+        let appearance: NSAppearance.Name =
+            ProcessInfo.processInfo.environment["VESTA_SNAPSHOT_ACCESSIBILITY"] == "1"
+            ? (isDark ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua)
+            : requestedAppearance
+        // A vibrant NSVisualEffectView cannot be cached faithfully in-process.
+        // Give the fallback a real opaque surface so labels and alpha overlays
+        // remain reviewable; this is explicitly not a picture of Liquid Glass.
+        let hosting = NSHostingView(rootView: view
+            .environment(\.colorScheme, isDark ? .dark : .light)
+            .background(capturesCompositor ? Color.clear : Color(nsColor: .windowBackgroundColor)))
         hosting.appearance = NSAppearance(named: appearance)
         hosting.layoutSubtreeIfNeeded()
 
@@ -192,7 +337,7 @@ public enum Snapshot {
 
         // Shown on screen and captured through the window server. Liquid Glass is
         // composited, not drawn by the view tree, so an in-process draw renders the
-        // slider handles as holes.
+        // custom glass surfaces incorrectly.
         //
         // Glass refracts what is behind it, so the window uses the popover's own
         // material over a fixed gradient standing in for a desktop. The capture takes
@@ -213,10 +358,16 @@ public enum Snapshot {
         window.hasShadow = false
         window.level = .floating
 
-        let material = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
-        material.material = .popover
-        material.blendingMode = .behindWindow
-        material.state = .active
+        let material: NSView
+        if capturesCompositor {
+            let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+            effect.material = .popover
+            effect.blendingMode = .behindWindow
+            effect.state = .active
+            material = effect
+        } else {
+            material = NSView(frame: NSRect(origin: .zero, size: size))
+        }
         material.wantsLayer = true
         material.layer?.cornerRadius = 12
         material.layer?.masksToBounds = true
@@ -276,8 +427,7 @@ public enum Snapshot {
 
     /// Whether the window server will hand us composited frames.
     ///
-    /// Asking costs one round-trip and saves rendering eight images with holes in
-    /// them where the glass should be.
+    /// Probe once so custom glass surfaces can use their drawable fallback.
     private static func compositorIsAvailable() async -> Bool {
         do {
             _ = try await SCShareableContent.excludingDesktopWindows(
@@ -303,8 +453,8 @@ public enum Snapshot {
             \(error.localizedDescription)
 
             Liquid Glass is composited by the window server, so it cannot be drawn
-            in-process: the slider handles come out as holes and the images show the
-            macOS 14 fallback instead. Grant Screen Recording to the binary being run
+            in-process: custom glass surfaces use an opaque fallback. Native sliders
+            still use the current system’s controls. Grant Screen Recording to the binary being run
             (System Settings > Privacy & Security > Screen & System Audio Recording)
             and run again to capture the real thing.
             ────────────────────────────────────────────────────────────────────

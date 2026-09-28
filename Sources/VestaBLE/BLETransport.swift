@@ -18,6 +18,9 @@ public final class BLETransport: NSObject, LightTransport, @unchecked Sendable {
     private var peripherals: [Light.ID: CBPeripheral] = [:]
     private var characteristics: [Light.ID: [CBUUID: CBCharacteristic]] = [:]
     private var handler: (@MainActor (TransportEvent) -> Void)?
+    private var isRunning = false
+    private var recoveryTimer: DispatchSourceTimer?
+    private var recovery = BLERecoveryPolicy(authorization: CBManager.authorization)
     /// Continuations for writes awaiting `didWriteValueFor`.
     private var pendingWrites: [WriteToken: CheckedContinuation<Void, Error>] = [:]
 
@@ -33,17 +36,73 @@ public final class BLETransport: NSObject, LightTransport, @unchecked Sendable {
     // MARK: - LightTransport
 
     public func start(handler: @escaping @MainActor (TransportEvent) -> Void) async {
-        queue.sync { self.handler = handler }
-        // Constructing the manager is what triggers the TCC prompt, so it happens
-        // here — behind an explicit user action — rather than at app launch.
-        central = CBCentralManager(delegate: self, queue: queue)
+        queue.sync {
+            self.handler = handler
+            guard !isRunning else { return }
+            isRunning = true
+            recovery = BLERecoveryPolicy(authorization: CBManager.authorization)
+            makeCentral()
+        }
     }
 
     public func stop() async {
         queue.sync {
-            central?.stopScan()
-            for p in peripherals.values { central?.cancelPeripheralConnection(p) }
+            isRunning = false
+            recoveryTimer?.cancel()
+            recoveryTimer = nil
+            tearDownCentral()
+            handler = nil
         }
+    }
+
+    public func refreshAvailability() async {
+        queue.sync { recoverIfNeeded(explicit: true) }
+    }
+
+    // All manager creation, teardown and delegate state live on the same queue.
+    private func makeCentral() {
+        emit(.availabilityChanged(.initializing))
+        central = CBCentralManager(delegate: self, queue: queue)
+    }
+
+    private func tearDownCentral() {
+        central?.delegate = nil
+        if central?.state == .poweredOn { central?.stopScan() }
+        for peripheral in peripherals.values {
+            peripheral.delegate = nil
+            if central?.state == .poweredOn {
+                central?.cancelPeripheralConnection(peripheral)
+            }
+            emit(.connectionChanged(id: peripheral.identifier, connection: .unreachable))
+        }
+        peripherals.removeAll()
+        characteristics.removeAll()
+        for continuation in pendingWrites.values {
+            continuation.resume(throwing: TransportError.notConnected)
+        }
+        pendingWrites.removeAll()
+        central = nil
+    }
+
+    private func recoverIfNeeded(explicit: Bool) {
+        guard isRunning, let central,
+              recovery.shouldRestart(state: central.state,
+                                     authorization: CBManager.authorization,
+                                     explicit: explicit) else { return }
+        Log.transport.info("recreating unavailable Bluetooth manager")
+        tearDownCentral()
+        makeCentral()
+    }
+
+    /// TCC can change without delivering another state callback to an old manager.
+    /// Poll only while unavailable, and stop polling as soon as Bluetooth is ready.
+    private func watchForPermissionChange() {
+        guard recoveryTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 2, repeating: 2)
+        timer.setEventHandler { [weak self] in self?.recoverIfNeeded(explicit: false) }
+        recoveryTimer = timer
+        timer.resume()
     }
 
     public func setPower(_ on: Bool, for id: Light.ID) async throws {
@@ -119,20 +178,43 @@ public final class BLETransport: NSObject, LightTransport, @unchecked Sendable {
 extension BLETransport: CBCentralManagerDelegate {
 
     public func centralManagerDidUpdateState(_ manager: CBCentralManager) {
+        guard isRunning, manager === central else { return }
+        if manager.state != .poweredOn {
+            for id in peripherals.keys {
+                emit(.connectionChanged(id: id, connection: .unreachable))
+            }
+            characteristics.removeAll()
+            for continuation in pendingWrites.values {
+                continuation.resume(throwing: TransportError.notConnected)
+            }
+            pendingWrites.removeAll()
+            if manager.state == .resetting || manager.state == .unknown {
+                for peripheral in peripherals.values { peripheral.delegate = nil }
+                peripherals.removeAll()
+            }
+            watchForPermissionChange()
+        }
         switch manager.state {
         case .poweredOn:
+            recoveryTimer?.cancel()
+            recoveryTimer = nil
             emit(.availabilityChanged(.ready))
+            for peripheral in peripherals.values where peripheral.state == .disconnected {
+                manager.connect(peripheral, options: nil)
+            }
             manager.scanForPeripherals(withServices: [HueProtocol.advertisedService],
                                        options: nil)
         case .unauthorized: emit(.availabilityChanged(.unauthorized))
         case .poweredOff:   emit(.availabilityChanged(.poweredOff))
         case .unsupported:  emit(.availabilityChanged(.unsupported))
-        default: break
+        case .unknown, .resetting: emit(.availabilityChanged(.initializing))
+        @unknown default: emit(.availabilityChanged(.unsupported))
         }
     }
 
     public func centralManager(_ manager: CBCentralManager, didDiscover peripheral: CBPeripheral,
                                advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        guard isRunning, manager === central else { return }
         let id = peripheral.identifier
         let isNew = peripherals[id] == nil
         peripherals[id] = peripheral
@@ -150,21 +232,24 @@ extension BLETransport: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ manager: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        guard isRunning, manager === central else { return }
         peripheral.discoverServices([HueProtocol.controlService, HueProtocol.deviceInfoService])
     }
 
     public func centralManager(_ manager: CBCentralManager, didFailToConnect peripheral: CBPeripheral,
                                error: Error?) {
+        guard isRunning, manager === central else { return }
         emit(.connectionChanged(id: peripheral.identifier, connection: .unreachable))
     }
 
     public func centralManager(_ manager: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
                                error: Error?) {
+        guard isRunning, manager === central else { return }
         characteristics[peripheral.identifier] = nil
         emit(.connectionChanged(id: peripheral.identifier, connection: .unreachable))
         // Reconnect automatically. This is a laptop — walking to the next room and
         // back is a normal thing to do, not an error the user should have to fix.
-        manager.connect(peripheral, options: nil)
+        if manager.state == .poweredOn { manager.connect(peripheral, options: nil) }
     }
 }
 
@@ -173,6 +258,7 @@ extension BLETransport: CBCentralManagerDelegate {
 extension BLETransport: CBPeripheralDelegate {
 
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard isRunning, peripherals[peripheral.identifier] === peripheral else { return }
         for service in peripheral.services ?? [] {
             let wanted = service.uuid == HueProtocol.controlService
                 ? HueProtocol.controlCharacteristics
@@ -183,6 +269,7 @@ extension BLETransport: CBPeripheralDelegate {
 
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService,
                            error: Error?) {
+        guard isRunning, peripherals[peripheral.identifier] === peripheral else { return }
         let id = peripheral.identifier
         for characteristic in service.characteristics ?? [] {
             characteristics[id, default: [:]][characteristic.uuid] = characteristic
@@ -206,6 +293,7 @@ extension BLETransport: CBPeripheralDelegate {
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
                            error: Error?) {
+        guard isRunning, peripherals[peripheral.identifier] === peripheral else { return }
         let id = peripheral.identifier
 
         if let error {
@@ -237,6 +325,7 @@ extension BLETransport: CBPeripheralDelegate {
 
     public func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic,
                            error: Error?) {
+        guard isRunning, peripherals[peripheral.identifier] === peripheral else { return }
         let token = WriteToken(light: peripheral.identifier, characteristic: characteristic.uuid)
         resolveWrite(token, error: error)
 
