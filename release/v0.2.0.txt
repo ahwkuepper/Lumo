@@ -1,0 +1,20 @@
+# Vesta 0.2.0 — what was built, and from what.
+#
+# tools/verify-release.sh rebuilds the unsigned binary from this tag and compares it
+# with unsigned-sha256. It is bit-for-bit reproducible given the same source, Xcode,
+# deployment target, architectures, and absolute build path — the script pins the
+# path, because the path is embedded in the binary.
+#
+# The commit is whatever this tag points at — a hash cannot name the tree that
+# contains it.
+#
+# dmg-sha256 is an integrity check on one artefact, not a reproducibility claim: a
+# signature embeds a certificate and an Apple timestamp, so a signed bundle is never
+# byte-identical twice and only the maintainer can produce one.
+
+version:         0.2.0
+unsigned-sha256: a6d74f244f8d771d77e78ed1045a0857f33d440c194ff5783e28fdecfb7185b4
+dmg-sha256:      PENDING
+xcode-build:     17C529
+macos-target:    14.0
+architectures:   arm64 x86_64
