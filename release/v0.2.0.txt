@@ -14,7 +14,7 @@
 
 version:         0.2.0
 unsigned-sha256: a6d74f244f8d771d77e78ed1045a0857f33d440c194ff5783e28fdecfb7185b4
-dmg-sha256:      PENDING
+dmg-sha256:      c8f13bbe140b5b022050b6db9657d9ae4b7e40a62d59968b23b943031acdfae3
 xcode-build:     17C529
 macos-target:    14.0
 architectures:   arm64 x86_64
