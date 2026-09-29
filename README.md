@@ -141,6 +141,29 @@ while native controls still follow the host macOS. See the
 - Xcode to build (not just Command Line Tools — SwiftUI's `@State` is a macro whose
   plugin ships inside Xcode). `build.sh` selects a toolchain via `DEVELOPER_DIR`.
 
+## Install with Homebrew
+
+Install from the [maintainer’s tap](https://github.com/ahwkuepper/homebrew-tap):
+
+```bash
+brew install --cask ahwkuepper/tap/vesta-hue
+```
+
+This installs the same signed, notarized universal app as the
+[GitHub releases](https://github.com/ahwkuepper/Vesta/releases). The current release,
+0.2.0, is a prerelease. The tap is maintained by this project; it is separate from
+Homebrew’s main cask collection. Use `vesta-hue`: the `vesta` cask is an unrelated app.
+
+If you already installed the identical release from its DMG, adopt that copy:
+
+```bash
+brew install --cask --adopt ahwkuepper/tap/vesta-hue
+```
+
+Homebrew checks that it matches. For an older or locally built copy, quit Vesta
+and move the old app to the Trash before installing; keep its settings and
+Keychain credentials. See the [tap’s instructions](https://github.com/ahwkuepper/homebrew-tap#install).
+
 ## Build
 
 Run once, to create a stable self-signed identity in the login keychain:
@@ -335,8 +358,9 @@ roughly when your Mac is awake. Article 1 has no exception for convenience.
 
 That is genuinely less convenient than an app that updates itself. Pick one:
 
-- **Homebrew** — `brew upgrade --cask vesta`. Homebrew does the checking, on your
-  schedule, with a tool you already gave network access.
+- **Homebrew** — run `brew update`, then
+  `brew upgrade --cask ahwkuepper/tap/vesta-hue`. Homebrew does the checking, on
+  your schedule. Install through the [maintainer’s tap](#install-with-homebrew) first.
 - **Watch the repository** — Watch → Custom → Releases. Email per release.
 - **A feed reader** — `https://github.com/ahwkuepper/Vesta/releases.atom`. No account
   needed; your reader polls, Vesta does not.

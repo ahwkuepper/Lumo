@@ -64,6 +64,30 @@ not attest.
     gh release create v0.1.0 --repo ahwkuepper/Vesta --prerelease \
         --notes-file CHANGELOG.md build/Vesta-0.1.0.dmg release/v0.1.0.txt
 
+## Update the Homebrew cask
+
+After the release and its notarized DMG are publicly downloadable, update
+[`ahwkuepper/homebrew-tap`](https://github.com/ahwkuepper/homebrew-tap). Publishing a
+GitHub release alone does not update the cask.
+
+- Download the published DMG and confirm its SHA-256 matches the completed release
+  manifest. Update `version` and `sha256` in `Casks/vesta-hue.rb`.
+- If GitHub marks the release as a prerelease, update the version-specific entry in
+  `audit_exceptions/github_prerelease_allowlist.json`; remove that entry for a
+  stable release. Update the tap README and this repository’s installation text
+  to reflect the version and release channel.
+- Run `brew style ahwkuepper/tap/vesta-hue` and
+  `brew audit --cask --strict --online ahwkuepper/tap/vesta-hue` against the updated
+  tap checkout, then open a pull request. The tap’s CI verifies clean installation,
+  the signature, Gatekeeper acceptance and both binary architectures.
+- Merge after CI passes. Check that `brew update` followed by
+  `brew upgrade --cask ahwkuepper/tap/vesta-hue` resolves the new release.
+
+The tap contains only package metadata and downloads the existing release. It
+needs no Developer ID or notarization credentials. Keep the unique `vesta-hue`
+token and the conflict with Homebrew’s unrelated `vesta` cask: their app bundle
+names collide on case-insensitive filesystems.
+
 ## Why releases are built at a fixed path
 
 The absolute build path is embedded in the binary, so it is part of the input, and
