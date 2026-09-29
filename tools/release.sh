@@ -228,6 +228,7 @@ sign)
     echo "The manifest now records the dmg hash. Commit it, republish, and then:"
     echo "  gh release create $TAG --repo ahwkuepper/Vesta --prerelease \\"
     echo "      --notes-file CHANGELOG.md build/Vesta-$VERSION.dmg release/$TAG.txt"
+    echo "Then update ahwkuepper/homebrew-tap with this version and DMG hash; see docs/RELEASING.md."
     ;;
 
 *)
